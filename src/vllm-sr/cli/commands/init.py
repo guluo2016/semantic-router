@@ -4,6 +4,7 @@ import shutil
 from pathlib import Path
 
 from cli.utils import getLogger
+from cli.consts import DEFAULT_DASHBOARD_PORT
 
 log = getLogger(__name__)
 
@@ -95,7 +96,7 @@ def init_command(force: bool = False):
     log.info("  1. Edit config.yaml to configure your setup")
     log.info("     Or use the dashboard for visual configuration")
     log.info("  2. Start service: vllm-sr serve")
-    log.info("  3. Open dashboard: http://localhost:8700")
+    log.info(f"  3. Open dashboard: http://localhost:{DEFAULT_DASHBOARD_PORT}")
     log.info("=" * 60)
 
     return True

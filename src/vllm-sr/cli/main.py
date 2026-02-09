@@ -8,6 +8,7 @@ from pathlib import Path
 from cli import __version__
 from cli.utils import getLogger
 from cli.core import start_vllm_sr, stop_vllm_sr, show_logs, show_status
+from cli.consts import DEFAULT_DASHBOARD_PORT
 from cli.consts import (
     VLLM_SR_DOCKER_IMAGE_DEFAULT,
     VLLM_SR_DOCKER_NAME,
@@ -311,7 +312,7 @@ def dashboard(no_open):
             log.info("Start it with: vllm-sr serve")
             sys.exit(1)
 
-        dashboard_url = "http://localhost:8700"
+        dashboard_url = f"http://localhost:{DEFAULT_DASHBOARD_PORT}"
 
         if no_open:
             log.info(f"Dashboard URL: {dashboard_url}")
