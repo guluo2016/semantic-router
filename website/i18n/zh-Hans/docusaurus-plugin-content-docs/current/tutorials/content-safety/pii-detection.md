@@ -2,7 +2,7 @@
 translation:
   source_commit: "bac2743"
   source_file: "docs/tutorials/content-safety/pii-detection.md"
-  outdated: false
+  outdated: true
 ---
 
 # PII 检测

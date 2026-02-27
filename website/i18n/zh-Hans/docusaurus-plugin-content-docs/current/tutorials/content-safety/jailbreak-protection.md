@@ -2,7 +2,7 @@
 translation:
   source_commit: "bac2743"
   source_file: "docs/tutorials/content-safety/jailbreak-protection.md"
-  outdated: false
+  outdated: true
 ---
 
 # Jailbreak 防护
