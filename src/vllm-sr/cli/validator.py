@@ -124,11 +124,26 @@ def validate_latency_aware_algorithm_config(
 def validate_algorithm_one_of(config: UserConfig) -> List[ValidationError]:
     errors = []
 
+    # Maps algorithm.type -> the expected sub-config block name.
+    # Types with no dedicated sub-config block (static, sequential, knn,
+    # kmeans, svm, mlp) are intentionally absent — they require no block.
     expected_block_by_type = {
+        # Looper algorithms
         "confidence": "confidence",
-        "concurrent": "concurrent",
+        "concurrent": "concurrent",   # deprecated; use "ratings"
+        "ratings": "ratings",
         "remom": "remom",
         "latency_aware": "latency_aware",
+        # Selection algorithms with optional per-decision config blocks
+        "elo": "elo",
+        "router_dc": "router_dc",
+        "automix": "automix",
+        "hybrid": "hybrid",
+        "gmtrouter": "gmtrouter",
+        # RL-driven (Go native + Python aliases)
+        "rl_driven": "rl_driven",
+        "thompson": "thompson",
+        "router_r1": "router_r1",
     }
 
     for decision in config.decisions:
@@ -141,10 +156,28 @@ def validate_algorithm_one_of(config: UserConfig) -> List[ValidationError]:
             configured_blocks.append("confidence")
         if algorithm.concurrent is not None:
             configured_blocks.append("concurrent")
+        if algorithm.ratings is not None:
+            configured_blocks.append("ratings")
         if algorithm.remom is not None:
             configured_blocks.append("remom")
         if algorithm.latency_aware is not None:
             configured_blocks.append("latency_aware")
+        if algorithm.elo is not None:
+            configured_blocks.append("elo")
+        if algorithm.router_dc is not None:
+            configured_blocks.append("router_dc")
+        if algorithm.automix is not None:
+            configured_blocks.append("automix")
+        if algorithm.hybrid is not None:
+            configured_blocks.append("hybrid")
+        if algorithm.gmtrouter is not None:
+            configured_blocks.append("gmtrouter")
+        if algorithm.rl_driven is not None:
+            configured_blocks.append("rl_driven")
+        if algorithm.thompson is not None:
+            configured_blocks.append("thompson")
+        if algorithm.router_r1 is not None:
+            configured_blocks.append("router_r1")
 
         display_type = (algorithm.type or "").strip() or "<empty>"
         normalized_type = (algorithm.type or "").strip().lower()
@@ -499,9 +532,24 @@ def validate_algorithm_configurations(config: UserConfig) -> List[ValidationErro
     """
     Validate algorithm configurations in decisions.
 
-    Validates both looper algorithms (confidence, concurrent, sequential, remom)
-    and selection algorithms (static, elo, router_dc, automix, hybrid,
-    latency_aware, thompson, gmtrouter, router_r1).
+    Validates both looper algorithms and selection algorithms.
+
+    Looper algorithms (multi-model execution in Go looper factory):
+      - "confidence", "ratings", "remom"
+      - "concurrent" is a deprecated Python alias for "ratings"; in Go it
+        silently falls through to BaseLooper (sequential execution).
+      - "sequential" maps to Go's default BaseLooper.
+
+    Selection algorithms (single model selection):
+      - "static", "elo", "router_dc", "automix", "hybrid", "latency_aware"
+      - "rl_driven" — Go native RL selection type
+      - "gmtrouter"
+      - "knn", "kmeans", "svm", "mlp" — ML-trained algorithms (require global
+        ml_selection config with pretrained model paths)
+
+    Python-only aliases (WARNING: Go does not recognize these natively):
+      - "thompson"  → requires translation to "rl_driven" before routing
+      - "router_r1" → requires translation to "rl_driven" before routing
 
     Args:
         config: User configuration
@@ -511,8 +559,17 @@ def validate_algorithm_configurations(config: UserConfig) -> List[ValidationErro
     """
     errors = []
 
-    # Valid algorithm types
-    looper_types = {"confidence", "concurrent", "sequential", "remom"}
+    # Valid algorithm types — must stay in sync with Go backend:
+    #   looper factory:   pkg/looper/looper.go
+    #   selection methods: pkg/selection/selector.go
+    #   request filter:   pkg/extproc/req_filter_classification.go
+    looper_types = {
+        "confidence",
+        "ratings",    # Go native concurrent looper
+        "remom",
+        "concurrent", # deprecated Python alias (→ BaseLooper in Go)
+        "sequential", # maps to BaseLooper in Go
+    }
     selection_types = {
         "static",
         "elo",
@@ -520,9 +577,16 @@ def validate_algorithm_configurations(config: UserConfig) -> List[ValidationErro
         "automix",
         "hybrid",
         "latency_aware",
-        "thompson",
+        # RL-driven
+        "rl_driven",  # Go native RL selection type
+        "thompson",   # Python alias (WARNING: not recognized by Go natively)
         "gmtrouter",
-        "router_r1",
+        "router_r1",  # Python alias (WARNING: not recognized by Go natively)
+        # ML-trained selection algorithms
+        "knn",
+        "kmeans",
+        "svm",
+        "mlp",
     }
     all_types = looper_types | selection_types
 

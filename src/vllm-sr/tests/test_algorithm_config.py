@@ -13,6 +13,8 @@ from cli.models import (
     RouterDCSelectionConfig,
     AutoMixSelectionConfig,
     HybridSelectionConfig,
+    RLDrivenSelectionConfig,
+    RatingsAlgorithmConfig,
     ThompsonSamplingConfig,
     GMTRouterConfig,
     RouterR1Config,
@@ -25,7 +27,7 @@ class TestAlgorithmConfigTypes:
 
     def test_valid_looper_types(self):
         """Test that looper algorithm types are accepted."""
-        looper_types = ["confidence", "concurrent", "remom"]
+        looper_types = ["confidence", "concurrent", "remom", "ratings", "sequential"]
 
         for algo_type in looper_types:
             config = AlgorithmConfig(type=algo_type)
@@ -40,9 +42,14 @@ class TestAlgorithmConfigTypes:
             "automix",
             "hybrid",
             "latency_aware",
-            "thompson",
+            "rl_driven",   # Go native RL type
+            "thompson",    # Python alias for rl_driven
             "gmtrouter",
-            "router_r1",
+            "router_r1",   # Python alias for rl_driven
+            "knn",
+            "kmeans",
+            "svm",
+            "mlp",
         ]
 
         for algo_type in selection_types:
@@ -341,3 +348,97 @@ class TestAlgorithmConfigIntegration:
             + config.hybrid.cost_weight
         )
         assert abs(total - 1.0) < 0.01
+
+    def test_ratings_algorithm_config(self):
+        """Test AlgorithmConfig with ratings looper (Go native concurrent looper)."""
+        config = AlgorithmConfig(
+            type="ratings",
+            ratings=RatingsAlgorithmConfig(max_concurrent=4, on_error="skip"),
+        )
+        assert config.type == "ratings"
+        assert config.ratings.max_concurrent == 4
+        assert config.ratings.on_error == "skip"
+
+    def test_rl_driven_algorithm_config_native(self):
+        """Test AlgorithmConfig with rl_driven (Go native RL selection type)."""
+        config = AlgorithmConfig(
+            type="rl_driven",
+            rl_driven=RLDrivenSelectionConfig(
+                exploration_rate=0.2,
+                use_thompson_sampling=True,
+                enable_personalization=True,
+            ),
+        )
+        assert config.type == "rl_driven"
+        assert config.rl_driven.exploration_rate == 0.2
+        assert config.rl_driven.use_thompson_sampling is True
+        assert config.rl_driven.enable_personalization is True
+
+    def test_rl_driven_with_router_r1_flags(self):
+        """Test RLDrivenSelectionConfig with Router-R1 fields."""
+        config = RLDrivenSelectionConfig(
+            use_router_r1_rewards=True,
+            enable_llm_routing=True,
+            router_r1_server_url="http://localhost:9090",
+        )
+        assert config.use_router_r1_rewards is True
+        assert config.enable_llm_routing is True
+        assert config.router_r1_server_url == "http://localhost:9090"
+
+    def test_ml_algorithm_types_no_subconfig(self):
+        """Test that knn/kmeans/svm/mlp types work without sub-config blocks.
+
+        These algorithms use globally configured ML model files and have no
+        per-decision configuration block.
+        """
+        for algo_type in ("knn", "kmeans", "svm", "mlp"):
+            config = AlgorithmConfig(type=algo_type)
+            assert config.type == algo_type
+
+
+class TestRatingsAlgorithmConfig:
+    """Test Ratings looper configuration."""
+
+    def test_default_values(self):
+        """Test Ratings config default values."""
+        config = RatingsAlgorithmConfig()
+        assert config.max_concurrent is None
+        assert config.on_error == "skip"
+
+    def test_custom_values(self):
+        """Test Ratings config with custom values."""
+        config = RatingsAlgorithmConfig(max_concurrent=8, on_error="fail")
+        assert config.max_concurrent == 8
+        assert config.on_error == "fail"
+
+
+class TestRLDrivenSelectionConfig:
+    """Test RLDrivenSelectionConfig (Go native RL selection config)."""
+
+    def test_default_values(self):
+        """Test RLDriven config default values."""
+        config = RLDrivenSelectionConfig()
+        assert config.exploration_rate == 0.3
+        assert config.use_thompson_sampling is True
+        assert config.enable_personalization is False
+        assert config.personalization_blend == 0.3
+        assert config.cost_awareness is False
+        assert config.use_router_r1_rewards is False
+        assert config.enable_llm_routing is False
+        assert config.router_r1_server_url is None
+
+    def test_exploration_rate_validation(self):
+        """Test that exploration_rate must be within 0-1."""
+        config = RLDrivenSelectionConfig(exploration_rate=0.5)
+        assert config.exploration_rate == 0.5
+
+        with pytest.raises(PydanticValidationError):
+            RLDrivenSelectionConfig(exploration_rate=1.5)  # Above 1.0
+
+    def test_cost_weight_validation(self):
+        """Test that cost_weight must be within 0-1."""
+        config = RLDrivenSelectionConfig(cost_weight=0.4)
+        assert config.cost_weight == 0.4
+
+        with pytest.raises(PydanticValidationError):
+            RLDrivenSelectionConfig(cost_weight=-0.1)  # Below 0.0

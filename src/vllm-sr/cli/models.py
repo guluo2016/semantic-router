@@ -290,6 +290,27 @@ class ConcurrentAlgorithmConfig(BaseModel):
     """Configuration for concurrent algorithm.
 
     This algorithm executes all models concurrently and aggregates results (arena mode).
+
+    NOTE: In the Go backend, "concurrent" is not a recognized algorithm type and will
+    silently fall through to BaseLooper (sequential execution). Use "ratings" instead,
+    which is the actual Go-level concurrent looper.
+    """
+
+    # Maximum number of concurrent model calls (default: no limit)
+    max_concurrent: Optional[int] = None
+
+    # Behavior on model call failure: "skip" or "fail"
+    on_error: Optional[str] = "skip"
+
+
+class RatingsAlgorithmConfig(BaseModel):
+    """Configuration for ratings algorithm.
+
+    This algorithm executes all models concurrently and returns multiple choices
+    for comparison, enabling rating-based evaluation of responses.
+
+    This is the Go backend equivalent of "concurrent" — use this type
+    (algorithm.type: "ratings") for true concurrent multi-model execution.
     """
 
     # Maximum number of concurrent model calls (default: no limit)
@@ -471,6 +492,46 @@ class HybridSelectionConfig(BaseModel):
     normalize_scores: Optional[bool] = True
 
 
+class RLDrivenSelectionConfig(BaseModel):
+    """Configuration for RL-Driven model selection.
+
+    Uses reinforcement learning (Thompson Sampling by default) for
+    exploration/exploitation balance, with optional Router-R1 LLM routing.
+    Reference: Router-R1 (arXiv:2506.09033)
+
+    This is the Go backend's actual algorithm type for RL-based selection.
+    Python aliases "thompson" and "router_r1" are convenience wrappers that
+    need to be translated to "rl_driven" when generating the router config.
+    """
+
+    # Initial exploration rate, 0-1 (default: 0.3)
+    exploration_rate: Optional[float] = Field(default=0.3, ge=0, le=1)
+
+    # Enable Thompson Sampling (default: True)
+    use_thompson_sampling: Optional[bool] = True
+
+    # Enable per-user preference tracking
+    enable_personalization: Optional[bool] = False
+
+    # Global vs user-specific blend, 0-1 (default: 0.3)
+    personalization_blend: Optional[float] = Field(default=0.3, ge=0, le=1)
+
+    # Enable cost-aware exploration
+    cost_awareness: Optional[bool] = False
+
+    # Cost influence weight, 0-1 (default: 0.0)
+    cost_weight: Optional[float] = Field(default=0.0, ge=0, le=1)
+
+    # Enable Router-R1 style reward computation
+    use_router_r1_rewards: Optional[bool] = False
+
+    # Enable LLM-based routing using Router-R1 approach
+    enable_llm_routing: Optional[bool] = False
+
+    # URL of the external Router-R1 LLM server
+    router_r1_server_url: Optional[str] = None
+
+
 # =============================================================================
 # RL-Driven Model Selection Algorithm Configs (from PR #1196 / Issue #994)
 # Reference papers:
@@ -551,34 +612,52 @@ class AlgorithmConfig(BaseModel):
 
     Specifies how multiple models in a decision should be orchestrated.
 
-    Supports three categories of algorithms:
+    Supports four categories of algorithms:
 
     1. Looper algorithms (multi-model execution):
        - "confidence": Try smaller models first, escalate if confidence is low
-       - "concurrent": Execute all models concurrently (arena mode)
-       - "remom": Multi-round parallel reasoning with intelligent synthesis
+       - "concurrent": DEPRECATED alias for "ratings"; in Go falls through to
+                       BaseLooper (sequential). Use "ratings" instead.
+       - "ratings":    Execute all models concurrently, return multiple choices
+                       for comparison. This is the Go-level concurrent looper.
+       - "remom":      Multi-round parallel reasoning with intelligent synthesis
 
     2. Selection algorithms (single model selection from candidates):
-       - "static": Use first model (default)
-       - "elo": Use Elo rating system with Bradley-Terry model
-       - "router_dc": Use embedding similarity for query-model matching
-       - "automix": Use POMDP-based cost-quality optimization
-       - "hybrid": Combine multiple selection methods
+       - "static":     Use first model (default)
+       - "elo":        Use Elo rating system with Bradley-Terry model
+       - "router_dc":  Use embedding similarity for query-model matching
+       - "automix":    Use POMDP-based cost-quality optimization
+       - "hybrid":     Combine multiple selection methods
+       - "latency_aware": TPOT/TTFT percentile-based latency selection
 
-    3. RL-driven selection algorithms (from issue #994):
-       - "thompson": Thompson Sampling with exploration/exploitation
-       - "gmtrouter": Graph neural network for personalized routing
-       - "router_r1": LLM-as-router with think/route actions
+    3. RL-driven selection algorithms:
+       - "rl_driven":  RL with Thompson Sampling / Router-R1 (Go native type)
+       - "thompson":   Convenience alias → Go "rl_driven" with thompson sampling
+                       WARNING: Go does not recognize "thompson" directly;
+                       requires translation layer before routing.
+       - "gmtrouter":  Graph neural network for personalized routing
+       - "router_r1":  LLM-as-router with think/route actions
+                       WARNING: Go does not recognize "router_r1" directly;
+                       requires translation layer before routing.
+
+    4. ML-trained selection algorithms (require pre-trained model files):
+       - "knn":    K-Nearest Neighbors (no per-decision sub-config)
+       - "kmeans": KMeans clustering (no per-decision sub-config)
+       - "svm":    Support Vector Machine (no per-decision sub-config)
+       - "mlp":    Multi-Layer Perceptron (no per-decision sub-config)
     """
 
-    # Algorithm type: looper ("confidence", "concurrent", "remom", "latency_aware") or
-    # selection ("static", "elo", "router_dc", "automix", "hybrid",
-    #            "thompson", "gmtrouter", "router_r1")
+    # Algorithm type — see docstring above for all supported values.
+    # Looper: "confidence" | "ratings" | "remom" | "concurrent" (deprecated)
+    # Selection: "static" | "elo" | "router_dc" | "automix" | "hybrid" |
+    #            "latency_aware" | "rl_driven" | "gmtrouter" |
+    #            "thompson" | "router_r1" | "knn" | "kmeans" | "svm" | "mlp"
     type: str
 
     # Looper algorithm configurations
     confidence: Optional[ConfidenceAlgorithmConfig] = None
     concurrent: Optional[ConcurrentAlgorithmConfig] = None
+    ratings: Optional[RatingsAlgorithmConfig] = None
     remom: Optional[ReMoMAlgorithmConfig] = None
     latency_aware: Optional[LatencyAwareAlgorithmConfig] = None
 
@@ -588,10 +667,11 @@ class AlgorithmConfig(BaseModel):
     automix: Optional[AutoMixSelectionConfig] = None
     hybrid: Optional[HybridSelectionConfig] = None
 
-    # RL-driven selection algorithms (from PR #1196, issue #994)
-    thompson: Optional[ThompsonSamplingConfig] = None
+    # RL-driven selection algorithms
+    rl_driven: Optional[RLDrivenSelectionConfig] = None  # Go native type
+    thompson: Optional[ThompsonSamplingConfig] = None     # Python alias
     gmtrouter: Optional[GMTRouterConfig] = None
-    router_r1: Optional[RouterR1Config] = None
+    router_r1: Optional[RouterR1Config] = None            # Python alias
 
     # Behavior on algorithm failure: "skip" or "fail"
     on_error: Optional[str] = "skip"
